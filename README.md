@@ -39,6 +39,9 @@ For most Windows users, the simplest path is:
 .\helius.exe
 ```
 
+On first launch, if no database exists yet, Helius prompts for a 3-letter currency
+code and initializes `%LOCALAPPDATA%\Helius\tracker.db` before opening the TUI.
+
 If you want to run it from anywhere, add that folder to your `PATH`.
 
 Release packages are built for local, single-user use and do not require any
@@ -124,6 +127,10 @@ If you are running the binary directly without adding it to `PATH`, use:
 ```
 
 ## First-Time Setup
+
+If you launch `helius.exe` with no existing database, Helius now prompts for a
+currency code and initializes the default database automatically. You can still
+set it up manually:
 
 ```powershell
 helius init --currency USD

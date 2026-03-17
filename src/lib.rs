@@ -9,7 +9,7 @@ mod theme;
 mod ui;
 
 use std::ffi::OsString;
-use std::io::{IsTerminal, Write};
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::Path;
 
 use chrono::{Datelike, Local, NaiveDate};
@@ -30,13 +30,15 @@ use crate::cli::{
     TransactionCommand, TransactionDeleteArgs, TransactionEditArgs, TransactionListArgs,
     TransactionRestoreArgs,
 };
-use crate::db::{resolve_db_path, Db};
+use crate::db::{db_requires_init, resolve_db_path, Db};
 pub use crate::error::AppError;
 use crate::model::{
     CsvImportPlan, ExportKind, NewPlanningGoal, NewPlanningItem, NewPlanningScenario,
     NewRecurringRule, NewTransaction, TransactionFilters, UpdatePlanningGoal, UpdatePlanningItem,
     UpdatePlanningScenario, UpdateRecurringRule, UpdateTransaction,
 };
+
+const DEFAULT_ONBOARDING_CURRENCY: &str = "USD";
 
 pub fn run_app<I, T>(
     args: I,
@@ -54,6 +56,9 @@ where
         Some(command) => run_command(&db_path, command, stdout),
         None => {
             if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+                let stdin = std::io::stdin();
+                let mut stdin = stdin.lock();
+                ensure_interactive_db_ready(&db_path, &mut stdin, stdout)?;
                 ui::run_tui(db_path)
             } else {
                 let mut command = Cli::command();
@@ -69,6 +74,73 @@ where
 
 pub fn format_error_message(message: &str) -> String {
     output::error_text(message)
+}
+
+fn ensure_interactive_db_ready(
+    db_path: &Path,
+    stdin: &mut dyn BufRead,
+    stdout: &mut dyn Write,
+) -> Result<(), AppError> {
+    if !db_requires_init(db_path)? {
+        return Ok(());
+    }
+
+    writeln!(stdout, "Helius is starting for the first time.")?;
+    writeln!(stdout, "No database was found at {}.", db_path.display())?;
+    writeln!(
+        stdout,
+        "Enter a 3-letter currency code to initialize your local database [{}].",
+        DEFAULT_ONBOARDING_CURRENCY
+    )?;
+    writeln!(
+        stdout,
+        "Press Enter to accept the default, or type `quit` to cancel."
+    )?;
+
+    loop {
+        write!(stdout, "Currency> ")?;
+        stdout.flush()?;
+
+        let mut input = String::new();
+        if stdin.read_line(&mut input)? == 0 {
+            return Err(AppError::Config(
+                "startup cancelled before database initialization".to_string(),
+            ));
+        }
+
+        let trimmed = input.trim();
+        if trimmed.eq_ignore_ascii_case("quit") || trimmed.eq_ignore_ascii_case("exit") {
+            return Err(AppError::Config(
+                "startup cancelled before database initialization".to_string(),
+            ));
+        }
+
+        let currency = if trimmed.is_empty() {
+            DEFAULT_ONBOARDING_CURRENCY
+        } else {
+            trimmed
+        };
+
+        let db = Db::open_for_init(db_path)?;
+        match db.init(currency) {
+            Ok(()) => {
+                writeln!(
+                    stdout,
+                    "Initialized database at {} with currency {}.",
+                    db_path.display(),
+                    currency.trim().to_ascii_uppercase()
+                )?;
+                writeln!(stdout, "Starting Helius...")?;
+                return Ok(());
+            }
+            Err(AppError::Validation(message)) => {
+                writeln!(stdout, "{message}")?;
+                writeln!(stdout, "Enter a 3-letter code such as USD or EUR.")?;
+            }
+            Err(AppError::AlreadyExists(_)) => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 fn with_existing_db<T, F>(db_path: &Path, run: F) -> Result<T, AppError>
@@ -1336,7 +1408,12 @@ pub fn today_iso() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{month_range, normalize_date};
+    use std::io::Cursor;
+
+    use tempfile::TempDir;
+
+    use super::{ensure_interactive_db_ready, month_range, normalize_date};
+    use crate::db::Db;
 
     #[test]
     fn normalizes_valid_dates() {
@@ -1353,5 +1430,38 @@ mod tests {
         let (from, to) = month_range("2026-02").unwrap();
         assert_eq!(from, "2026-02-01");
         assert_eq!(to, "2026-02-28");
+    }
+
+    #[test]
+    fn interactive_setup_initializes_missing_database_with_default_currency() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("tracker.db");
+        let mut stdin = Cursor::new(b"\n");
+        let mut stdout = Vec::new();
+
+        ensure_interactive_db_ready(&db_path, &mut stdin, &mut stdout).unwrap();
+
+        let db = Db::open_existing(&db_path).unwrap();
+        assert_eq!(db.currency_code().unwrap(), "USD");
+
+        let output = String::from_utf8(stdout).unwrap();
+        assert!(output.contains("No database was found"));
+        assert!(output.contains("Initialized database"));
+    }
+
+    #[test]
+    fn interactive_setup_retries_until_currency_is_valid() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("tracker.db");
+        let mut stdin = Cursor::new(b"US\nEUR\n");
+        let mut stdout = Vec::new();
+
+        ensure_interactive_db_ready(&db_path, &mut stdin, &mut stdout).unwrap();
+
+        let db = Db::open_existing(&db_path).unwrap();
+        assert_eq!(db.currency_code().unwrap(), "EUR");
+
+        let output = String::from_utf8(stdout).unwrap();
+        assert!(output.contains("Enter a 3-letter code such as USD or EUR."));
     }
 }

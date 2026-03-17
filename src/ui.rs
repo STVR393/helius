@@ -20,24 +20,59 @@ mod render;
 
 use app::App;
 
+type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
+
+struct TerminalSession {
+    terminal: AppTerminal,
+}
+
+impl TerminalSession {
+    fn new() -> Result<Self, AppError> {
+        let mut stdout = io::stdout();
+        enable_raw_mode()?;
+        if let Err(error) = execute!(stdout, EnterAlternateScreen) {
+            let _ = disable_raw_mode();
+            return Err(error.into());
+        }
+
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = match Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                let _ = disable_raw_mode();
+                let mut stdout = io::stdout();
+                let _ = execute!(stdout, LeaveAlternateScreen);
+                return Err(error.into());
+            }
+        };
+
+        if let Err(error) = terminal.clear() {
+            let _ = disable_raw_mode();
+            let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+            let _ = terminal.show_cursor();
+            return Err(error.into());
+        }
+
+        Ok(Self { terminal })
+    }
+
+    fn terminal_mut(&mut self) -> &mut AppTerminal {
+        &mut self.terminal
+    }
+}
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
+}
+
 pub fn run_tui(db_path: PathBuf) -> Result<(), AppError> {
-    let mut stdout = io::stdout();
-    enable_raw_mode()?;
-    execute!(stdout, EnterAlternateScreen)?;
-
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
-
-    let result = {
-        let mut app = App::new(db_path)?;
-        app.run(&mut terminal)
-    };
-
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-    result
+    let mut app = App::new(db_path)?;
+    let mut session = TerminalSession::new()?;
+    app.run(session.terminal_mut())
 }
 
 pub(super) fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {

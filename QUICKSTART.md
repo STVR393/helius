@@ -8,6 +8,10 @@ cargo build --release
 
 ## 2. Initialize a Database
 
+If you run `target\release\helius.exe` with no existing database, it will prompt
+for a currency code and initialize the default database automatically. You can
+also initialize it explicitly:
+
 ```powershell
 target\release\helius.exe init --currency USD
 ```
