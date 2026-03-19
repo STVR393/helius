@@ -33,7 +33,7 @@ Helius is a local-first personal finance tracker built in Rust with a full-scree
 For most Windows users, the simplest path is:
 
 1. Open the [GitHub Releases](https://github.com/STVR393/helius-personal-finance-tracker/releases) page.
-2. Download the latest Windows package, for example `helius-v0.1.2-windows-x86_64.zip`.
+2. Download the latest Windows package, for example `helius-v0.1.3-windows-x86_64.zip`.
 3. Extract `helius.exe` into a folder you keep for apps, for example `C:\Tools\Helius\`.
 4. Launch it by double-clicking `helius.exe`, or from a terminal with:
 

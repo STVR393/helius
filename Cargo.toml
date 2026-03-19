@@ -1,6 +1,6 @@
 [package]
 name = "helius"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Local-first personal finance tracker for Windows with a Rust CLI/TUI, SQLite storage, budgets, recurring bills, and cash-flow forecasting"
 license = "AGPL-3.0-only"
